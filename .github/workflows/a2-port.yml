@@ -1,0 +1,17 @@
+name: a2-port
+on:
+  push:
+    branches: [a2-latency-port]
+    paths: ['src/**','tests/**','.github/workflows/a2-port.yml']
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Existing simulator tests
+        run: make test
+      - name: Elastic A2 policy tests
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror tests/test_elastic_dual_lru.cpp -o /tmp/test_elastic
+          /tmp/test_elastic
