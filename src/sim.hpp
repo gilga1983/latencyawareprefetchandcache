@@ -33,6 +33,9 @@ struct AccessResult {
 struct Metrics {
     std::uint64_t demands = 0;
     long double total_latency = 0;
+    long double prefetch_delayed_latency = 0;
+    long double demand_coalesced_latency = 0;
+    long double new_miss_latency = 0;
     std::uint64_t resident_hits = 0;
     std::uint64_t prefetch_delayed_hits = 0;
     std::uint64_t demand_coalesced_hits = 0;
@@ -48,6 +51,16 @@ struct Metrics {
 
     double average_access_time() const {
         return demands ? static_cast<double>(total_latency / demands) : 0.0;
+    }
+    double average_demand_coalesced_wait() const {
+        return demand_coalesced_hits
+            ? static_cast<double>(demand_coalesced_latency / demand_coalesced_hits)
+            : 0.0;
+    }
+    double average_prefetch_delayed_wait() const {
+        return prefetch_delayed_hits
+            ? static_cast<double>(prefetch_delayed_latency / prefetch_delayed_hits)
+            : 0.0;
     }
 };
 
@@ -246,6 +259,19 @@ private:
 
     AccessResult record(AccessResult r) {
         metrics_.total_latency += r.latency;
+        switch (r.kind) {
+            case AccessClass::PrefetchDelayed:
+                metrics_.prefetch_delayed_latency += r.latency;
+                break;
+            case AccessClass::DemandCoalesced:
+                metrics_.demand_coalesced_latency += r.latency;
+                break;
+            case AccessClass::NewMiss:
+                metrics_.new_miss_latency += r.latency;
+                break;
+            case AccessClass::ResidentHit:
+                break;
+        }
         return r;
     }
 
