@@ -1,0 +1,32 @@
+name: fast-lru-equivalence
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/fast-lru-equivalence.yml'
+
+jobs:
+  full-equivalence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install trace dependency
+        run: python -m pip install zstandard
+      - name: Build benchmark
+        run: make trace_bench
+      - name: Full zero-latency equivalence on all FAST traces
+        run: |
+          mkdir -p results
+          python tools/run_fast_lru.py \
+            --binary ./trace_bench \
+            --limit 0 \
+            --latencies-us 0 \
+            --out results/fast_lru_full_equivalence.json
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fast-lru-full-equivalence
+          path: results/
