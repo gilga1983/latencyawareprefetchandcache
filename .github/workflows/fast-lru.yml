@@ -26,6 +26,14 @@ jobs:
             --limit 1000000 \
             --latencies-us 0,1000,5000,10000,20000 \
             --out results/fast_lru_1m.json
+      - name: Coarse-timestamp sensitivity screen
+        run: |
+          python tools/run_fast_lru.py \
+            --binary ./trace_bench \
+            --limit 1000000 \
+            --latencies-us 0,1000,5000,10000,20000 \
+            --time-model raw \
+            --out results/fast_lru_1m_raw_time.json
       - name: Full published-trace equivalence and latency screen
         run: |
           python tools/run_fast_lru.py \
