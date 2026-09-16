@@ -15,3 +15,7 @@ jobs:
         run: |
           g++ -std=c++17 -O2 -Wall -Wextra -Werror tests/test_elastic_dual_lru.cpp -o /tmp/test_elastic
           /tmp/test_elastic
+      - name: A2 Map tests
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror tests/test_a2_map.cpp -o /tmp/test_a2_map
+          /tmp/test_a2_map
