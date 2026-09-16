@@ -11,10 +11,10 @@ The simulator at backend latency `L=0` is required to reproduce an immediate-fil
 | `msr_hm_0` | 3,993,316 | 0.634662270654 | 0.634662270654263 |
 | `w90` | 4,493,515 | 0.232112277360 | 0.232112277359706 |
 | `w91` | 4,316,605 | 0.436925778476 | 0.436925778476372 |
-| `w92` | 4,284,658 | 0.169992797558 | 0.169992797558000 (rounding) |
-| `w93` | 3,351,357 | 0.134939369336 | 0.134939369336000 (rounding) |
-| `w94` | 4,118,188 | 0.037890450849 | 0.037890450849000 (rounding) |
-| `w95` | 3,937,240 | 0.652779866099 | 0.652779866099000 (rounding) |
+| `w92` | 4,284,658 | 0.169992797558 | 0.169992797558172 |
+| `w93` | 3,351,357 | 0.134939369336 | 0.134939369336063 |
+| `w94` | 4,118,188 | 0.037890450849 | 0.037890450848771 |
+| `w95` | 3,937,240 | 0.652779866099 | 0.652779866099095 |
 
 The one-million-request screen over all 20 FAST traces also passes the exact internal invariant: the event-driven simulator at `L=0` has the same resident hits, misses, and byte-LRU state transitions as the independent immediate-LRU reference.
 
