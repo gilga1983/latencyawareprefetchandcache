@@ -3,6 +3,9 @@ on:
   push:
     branches: [a3-latency-aware]
     paths: ['src/**','tests/**','.github/workflows/a3-latency.yml']
+  pull_request:
+    branches: [a2-latency-port]
+    paths: ['.github/workflows/a3-latency.yml']
   workflow_dispatch:
 
 jobs:
