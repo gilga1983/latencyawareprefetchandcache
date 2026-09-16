@@ -1,0 +1,123 @@
+name: a3-latency
+on:
+  push:
+    branches: [a3-latency-aware]
+    paths: ['src/**','tests/**','.github/workflows/a3-latency.yml']
+  workflow_dispatch:
+
+jobs:
+  production-a2-vs-a3:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y cmake pkg-config libglib2.0-dev libzstd-dev libaio-dev
+          python -m pip install --quiet zstandard
+      - uses: actions/checkout@v4
+        with:
+          repository: gilga1983/rankmap-cache
+          ref: a3-latency-aware
+          path: rankmap
+      - name: Unit-test A3 latency scoring
+        working-directory: rankmap
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            projects/joint_cache_prefetch/test_latency_a3_scoring.cpp \
+            -Iprojects/joint_cache_prefetch -o /tmp/test_latency_a3
+          /tmp/test_latency_a3
+      - name: Build production A2 and A3
+        working-directory: rankmap
+        run: |
+          python projects/joint_cache_prefetch/build_latency_a2.py --artifact-dir _native/capsule
+          python projects/joint_cache_prefetch/build_latency_a3.py --artifact-dir _native/capsule
+      - name: Materialize 1M prn_0 requests and exact spread arrivals
+        run: |
+          python - <<'PY'
+          import sys,struct
+          sys.path.insert(0,'tools')
+          from run_fast_lru import materialize
+          N=1_000_000
+          materialize('msr_prn_0',N,'/tmp/prn.oracle')
+          rec=[]
+          with open('/tmp/prn.oracle','rb') as f:
+            while len(rec)<N:
+              b=f.read(24)
+              if not b: break
+              rec.append(struct.unpack('<IQIq',b))
+          first=rec[0][0]; out=[]; i=0
+          while i<len(rec):
+            j=i+1
+            while j<len(rec) and rec[j][0]==rec[i][0]: j+=1
+            n=j-i;base=(rec[i][0]-first)*1_000_000
+            out.extend(base+((k+1)*1_000_000)//(n+1) for k in range(n))
+            i=j
+          open('/tmp/arrivals.txt','w').write('\n'.join(map(str,out))+'\n')
+          print('requests',len(rec),'arrivals',len(out),'first',out[0],'last',out[-1])
+          PY
+      - name: Run A2 and A3 at 10 ms
+        working-directory: rankmap
+        run: |
+          M=10485760
+          L=10000
+          A2=_native/capsule/_build/bin/native_bench_latency_a2
+          A3=_native/capsule/_build/bin/native_bench_latency_a3
+          V8_BYTE_BUDGET=131072 JCP_ELASTIC_CACHE_QUOTA_BYTES="$M" \
+            JCP_ELASTIC_A1=1 JCP_A1_PARTS=10 JCP_A1_INTERVAL_BYTES=104857600 \
+            JCP_LATENCY_US="$L" JCP_LATENCY_ARRIVALS=/tmp/arrivals.txt \
+            "$A2" /tmp/prn.oracle "$M" 4.0 v8 > /tmp/a2.out 2> /tmp/a2.err
+          V8_BYTE_BUDGET=131072 JCP_ELASTIC_CACHE_QUOTA_BYTES="$M" \
+            JCP_ELASTIC_A3=1 JCP_A3_PARTS=10 JCP_A3_INTERVAL_BYTES=104857600 \
+            JCP_LATENCY_US="$L" JCP_LATENCY_ARRIVALS=/tmp/arrivals.txt \
+            "$A3" /tmp/prn.oracle "$M" 4.0 v8 > /tmp/a3.out 2> /tmp/a3.err
+      - name: Validate and print A2 vs A3
+        run: |
+          python - <<'PY'
+          import json
+          def last(path,key):
+            rows=[]
+            for line in open(path):
+              if key in line:
+                try: rows.append(json.loads(line))
+                except json.JSONDecodeError: pass
+            if not rows: raise SystemExit(f'missing {key} in {path}')
+            return rows[-1]
+          a2=last('/tmp/a2.out','jcp_a2_latency')
+          a3=last('/tmp/a3.out','jcp_a3_latency')
+          r2=last('/tmp/a2.out','jcp_elastic_rap')
+          r3=last('/tmp/a3.out','jcp_elastic_rap')
+          m3=last('/tmp/a3.out','jcp_a3_map_objective')
+          s2=last('/tmp/a2.out','jcp_elastic_a1_summary')
+          s3=last('/tmp/a3.out','jcp_elastic_a3_summary')
+          assert a2['demands']==1_000_000 and a3['demands']==1_000_000
+          assert a2['latency_us']==10000 and a3['latency_us']==10000
+          result={
+            'requests':a2['demands'],'latency_us':10000,
+            'a2_aat_us':a2['average_access_time_us'],
+            'a3_aat_us':a3['average_access_time_us'],
+            'aat_delta_us':a3['average_access_time_us']-a2['average_access_time_us'],
+            'aat_improvement_pct':100.0*(a2['average_access_time_us']-a3['average_access_time_us'])/a2['average_access_time_us'],
+            'a2_hit_ratio':r2['hit_ratio'],'a3_hit_ratio':r3['hit_ratio'],
+            'a2_prefetch_delayed_hits':a2['prefetch_delayed_hits'],
+            'a3_prefetch_delayed_hits':a3['prefetch_delayed_hits'],
+            'a2_prefetch_fetches':a2['prefetch_fetches'],'a3_prefetch_fetches':a3['prefetch_fetches'],
+            'a2_final_cache_quota_bytes':s2['final_cache_quota_bytes'],
+            'a3_final_cache_quota_bytes':s3['final_cache_quota_bytes'],
+            'a3_last_estimated_aat_us':m3['estimated_aat_us'],
+          }
+          open('/tmp/a2-vs-a3.json','w').write(json.dumps(result,indent=2)+'\n')
+          print(json.dumps(result,indent=2))
+          PY
+          echo '--- A3 final expert scores ---'
+          grep '^EXPERT_STAT ' /tmp/a3.err | tail -22 || true
+          echo '--- A3 map decisions ---'
+          grep 'jcp_a3_map_objective' /tmp/a3.out | tail -5 || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: a2-vs-a3-prn0-1m-10ms
+          path: |
+            /tmp/a2-vs-a3.json
+            /tmp/a2.out
+            /tmp/a2.err
+            /tmp/a3.out
+            /tmp/a3.err
