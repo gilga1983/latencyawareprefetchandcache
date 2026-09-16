@@ -20,6 +20,8 @@ a_{b,j}=bT+\frac{(j+1)T}{m+1},\qquad j=0,\ldots,m-1,
 
 where `T` is the number of simulator time units per coarse bucket. This preserves order and observed requests per bucket without treating every request in the bucket as simultaneous. A synthetic request clock `a_i=a_0+i\Delta` is also supported for controlled experiments.
 
+For traces whose timestamp resolution is coarser than the latency being studied, reconstructed sub-bucket timing is a modeling assumption. Results should therefore report the time model and use alternative within-bucket reconstructions as sensitivity tests. Raw equal timestamps are useful as an intentionally extreme sensitivity case, but are not treated as physical simultaneity when the trace clock is too coarse to justify that interpretation.
+
 ## 2. Object state
 
 At any simulated time an object is in exactly one data state:
@@ -130,7 +132,7 @@ The baseline policy is a byte-capacity LRU:
 
 Once resident, a demand-fetched object and a prefetched object obey the same replacement rules. Origin is retained only for accounting/policy hooks.
 
-## 8. Primary objective
+## 8. Primary objective and hit classes
 
 For `N` demands, the primary metric is average access time
 
@@ -138,9 +140,35 @@ For `N` demands, the primary metric is average access time
 \mathrm{AAT}=\frac{1}{N}\sum_{i=1}^N A_i.
 \]
 
-Resident-hit ratio remains diagnostic. Delayed hits must not be collapsed into a hit/miss bit because two delayed hits can hide very different fractions of backend latency.
+Latency makes the conventional hit/miss bit insufficient. We therefore distinguish:
 
-The simulator also records resident hits, prefetch-delayed hits, demand-coalesced hits, new misses, backend fetches/bytes, prefetch fetches/bytes, redundant prefetches, and oversize suppressions. Tail-latency statistics will be added when trace execution is wired in.
+\[
+H_R=\frac{N_R}{N},
+\]
+
+the **resident-hit ratio**, and
+
+\[
+H_C=\frac{N_C}{N},
+\]
+
+the **demand-coalesced ratio** for demands that join an outstanding demand fetch. With no prefetching, define
+
+\[
+H_{\mathrm{IO}}=H_R+H_C=1-\frac{N_{\mathrm{new\ miss}}}{N},
+\]
+
+the **I/O-avoidance ratio**: demands that launch no new backend I/O. In the zero-latency limit, `H_C=0` and `H_IO=H_R`, recovering ordinary hit ratio. At nonzero latency an access that an instantaneous simulator would count as a hit may instead become a coalesced delayed hit, so `H_R` can fall while `H_IO` and backend traffic remain nearly unchanged.
+
+For a fixed backend latency `L` and no prefetching, AAT decomposes as
+
+\[
+\mathrm{AAT}=\frac{N_M L+\sum_{i\in C} R_i}{N},
+\]
+
+where `N_M` is the number of new misses and `R_i` is the residual wait of coalesced demand `i`. This decomposition makes the average coalesced wait a direct diagnostic of latency hidden by request overlap.
+
+The simulator records resident hits, prefetch-delayed hits, demand-coalesced hits, new misses, total latency by access class, backend fetches/bytes, prefetch fetches/bytes, redundant prefetches, and oversize suppressions. Tail-latency statistics will be added when needed for the trace evaluation.
 
 ## 9. Residual latency value
 
