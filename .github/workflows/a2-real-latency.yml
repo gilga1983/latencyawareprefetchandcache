@@ -1,0 +1,51 @@
+name: a2-real-latency
+on:
+  push:
+    branches: [a2-latency-port]
+    paths: ['.github/workflows/a2-real-latency.yml']
+  workflow_dispatch:
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y cmake pkg-config libglib2.0-dev libzstd-dev libaio-dev
+          python -m pip install --quiet zstandard
+      - name: Build latency simulator
+        run: make trace_bench
+      - name: Checkout production RAP source
+        uses: actions/checkout@v4
+        with:
+          repository: gilga1983/rankmap-cache
+          ref: joint-cache-prefetch-sizing
+          path: rankmap
+      - name: Build production A2
+        working-directory: rankmap
+        run: python projects/joint_cache_prefetch/build_elastic_a1.py --artifact-dir _native/capsule
+      - name: Materialize matched trace
+        run: |
+          python - <<'PY'
+          import sys
+          sys.path.insert(0,'tools')
+          from run_fast_lru import materialize
+          materialize('msr_prn_0',300000,'/tmp/msr_prn_0.oracle')
+          PY
+      - name: Run production A2 and capture issued prediction stream
+        working-directory: rankmap
+        run: |
+          BIN=_native/capsule/_build/bin/native_bench_jcp_elastic_a1
+          M=10485760
+          V8_BYTE_BUDGET=131072 JCP_ELASTIC_CACHE_QUOTA_BYTES="$M" JCP_ELASTIC_A1=1 JCP_A1_PARTS=10 JCP_A1_INTERVAL_BYTES=104857600 \
+            "$BIN" /tmp/msr_prn_0.oracle "$M" 4.0 v8 > /tmp/a2.stdout 2> /tmp/a2.stderr
+          grep 'jcp_elastic_rap' /tmp/a2.stdout | tail -1 | tee /tmp/a2-summary.json
+      - name: Archive evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: a2-real-latency-build
+          path: |
+            /tmp/a2.stdout
+            /tmp/a2.stderr
+            /tmp/a2-summary.json
