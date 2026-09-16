@@ -1,9 +1,7 @@
 name: tests
-
 on:
   push:
   pull_request:
-
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
@@ -11,3 +9,70 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build and test
         run: make test
+  actual-a2-latency:
+    if: github.ref == 'refs/heads/a2-latency-port'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y cmake pkg-config libglib2.0-dev libzstd-dev libaio-dev
+          python -m pip install --quiet zstandard
+      - uses: actions/checkout@v4
+        with:
+          repository: gilga1983/rankmap-cache
+          ref: a2-latency-export
+          path: rankmap
+      - name: Build production latency A2
+        working-directory: rankmap
+        run: python projects/joint_cache_prefetch/build_latency_a2.py --artifact-dir _native/capsule
+      - name: Prepare matched trace and arrivals
+        run: |
+          python - <<'PY'
+          import sys,struct
+          sys.path.insert(0,'tools');from run_fast_lru import materialize
+          materialize('msr_prn_0',300000,'/tmp/prn.oracle')
+          rec=[]
+          with open('/tmp/prn.oracle','rb') as f:
+            while len(rec)<300000:
+              b=f.read(24)
+              if not b:break
+              rec.append(struct.unpack('<IQIq',b))
+          first=rec[0][0];arr=[];i=0
+          while i<len(rec):
+            j=i+1
+            while j<len(rec) and rec[j][0]==rec[i][0]:j+=1
+            n=j-i;base=(rec[i][0]-first)*1000000
+            arr += [base+((k+1)*1000000)//(n+1) for k in range(n)]
+            i=j
+          open('/tmp/arrivals.txt','w').write('\n'.join(map(str,arr))+'\n')
+          print('prepared',len(rec),'requests')
+          PY
+      - name: Run A2 0-20ms
+        working-directory: rankmap
+        run: |
+          BIN=_native/capsule/_build/bin/native_bench_latency_a2; M=10485760; : >/tmp/a2.jsonl
+          for L in 0 1000 5000 10000 20000; do
+            V8_BYTE_BUDGET=131072 JCP_ELASTIC_CACHE_QUOTA_BYTES=$M JCP_ELASTIC_A1=1 JCP_A1_PARTS=10 JCP_A1_INTERVAL_BYTES=104857600 JCP_LATENCY_US=$L JCP_LATENCY_ARRIVALS=/tmp/arrivals.txt "$BIN" /tmp/prn.oracle $M 4.0 v8 > /tmp/run-$L.out 2>/tmp/run-$L.err
+            grep 'jcp_a2_latency' /tmp/run-$L.out | tail -1 | tee -a /tmp/a2.jsonl
+            grep 'jcp_elastic_rap' /tmp/run-$L.out | tail -1
+          done
+      - name: Run baselines and print final table
+        run: |
+          make trace_bench
+          python tools/run_prefetch_smoke.py --binary ./trace_bench --trace msr_prn_0 --limit 300000 --capacity 10485760 --latencies-us 0,1000,5000,10000,20000 --prefetchers none,stride,pg --out /tmp/base.json
+          python - <<'PY'
+          import json
+          a=[json.loads(x) for x in open('/tmp/a2.jsonl') if x.strip()];b=json.load(open('/tmp/base.json'))['results'];d={r['prefetcher']:{s['latency_us']:s['average_access_time_us'] for s in r['scenarios']} for r in b}
+          print('FINAL latency_us none stride pg a2')
+          for x in a:
+            L=x['latency_us'];print(L,d['none'][L],d['stride'][L],d['pg'][L],x['average_access_time_us'])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: actual-a2-latency
+          path: |
+            /tmp/a2.jsonl
+            /tmp/base.json
+            /tmp/run-*.out
+            /tmp/run-*.err
