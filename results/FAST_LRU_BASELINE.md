@@ -4,11 +4,15 @@ Initial validation and exploratory results for latency-aware LRU. The trace read
 
 ## Zero-latency equivalence
 
-The simulator at backend latency `L=0` is required to reproduce an immediate-fill byte-LRU exactly. For the complete selected traces below, the independent immediate-LRU implementation also reproduces the frozen FAST paper hit ratios (differences are only decimal-rounding noise).
+The simulator at backend latency `L=0` is required to reproduce an immediate-fill byte-LRU exactly. A full zero-latency regression was run over **all 20 FAST traces, totaling 434,259,724 requests**. Every request count matches the frozen submitted evaluation, and every LRU hit ratio matches to printed-decimal/floating-point noise. The maximum absolute hit-ratio difference over all 20 traces is `4.93e-13` (`msr_prxy_0`).
+
+Representative complete traces are shown below.
 
 | Trace | Requests | FAST LRU HR | New `L=0` HR |
 |---|---:|---:|---:|
 | `msr_hm_0` | 3,993,316 | 0.634662270654 | 0.634662270654263 |
+| `msr_prn_0` | 5,585,886 | 0.702595255256 | 0.702595255255836 |
+| `msr_prxy_1` | 168,638,964 | 0.990481814155 | 0.990481814155357 |
 | `w90` | 4,493,515 | 0.232112277360 | 0.232112277359706 |
 | `w91` | 4,316,605 | 0.436925778476 | 0.436925778476372 |
 | `w92` | 4,284,658 | 0.169992797558 | 0.169992797558172 |
@@ -16,7 +20,7 @@ The simulator at backend latency `L=0` is required to reproduce an immediate-fil
 | `w94` | 4,118,188 | 0.037890450849 | 0.037890450848771 |
 | `w95` | 3,937,240 | 0.652779866099 | 0.652779866099095 |
 
-The one-million-request screen over all 20 FAST traces also passes the exact internal invariant: the event-driven simulator at `L=0` has the same resident hits, misses, and byte-LRU state transitions as the independent immediate-LRU reference.
+The one-million-request latency screen over all 20 FAST traces also passes the exact internal invariant: the event-driven simulator at `L=0` has the same resident hits, misses, and byte-LRU state transitions as the independent immediate-LRU reference.
 
 ## What changes at nonzero latency?
 
@@ -73,7 +77,7 @@ Under raw timestamps, the coalesced fraction is effectively identical for 1, 5, 
 
 ## Takeaways for the next simulator stage
 
-1. **The zero-latency bridge is clean.** The new event model recovers the old FAST byte-LRU result when latency is removed.
+1. **The zero-latency bridge is clean across the entire trace set.** The new event model recovers the submitted FAST byte-LRU results over all 434.26M requests when latency is removed.
 2. **Resident hit ratio is no longer enough.** `H_R`, demand-coalesced `H_C`, I/O-avoidance `H_IO`, and AAT expose different phenomena.
 3. **Latency mostly changes waiting, not backend traffic, for demand-only LRU.** This makes AAT a genuinely new objective instead of a renamed miss ratio.
 4. **There is meaningful room for latency-aware prefetching even when backend traffic is unchanged.** A prefetch can turn a demand-coalesced wait into a shorter delayed wait or a resident hit.
